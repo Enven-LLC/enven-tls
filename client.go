@@ -288,6 +288,13 @@ func (c *httpClient) GetCookieJar() http.CookieJar {
 // If the returned error is nil, the response contains a non-nil body, which the user is expected to close.
 func (c *httpClient) Do(req *http.Request) (*WebResp, error) {
 
+	if c.bjar != nil {
+		cookies := c.bjar.GetCookies()
+		if cookies != "" {
+			req.Header.Set("Cookie", cookies)
+		}
+	}
+
 	// Header order must be defined in all lowercase. On HTTP 1 people sometimes define them also in uppercase and then ordering does not work.
 	c.headerLck.Lock()
 
@@ -297,13 +304,6 @@ func (c *httpClient) Do(req *http.Request) (*WebResp, error) {
 
 	req.Header[http.HeaderOrderKey] = allToLower(req.Header[http.HeaderOrderKey])
 	c.headerLck.Unlock()
-
-	if c.bjar != nil {
-		cookies := c.bjar.GetCookies()
-		if cookies != "" {
-			req.Header.Set("Cookie", cookies)
-		}
-	}
 
 	resp, err := c.Client.Do(req)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Dharmey747/quic-go-utls/http3"
 	"github.com/Enven-LLC/enven-tls/profiles"
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/fhttp/http2"
@@ -250,6 +251,57 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 
 		t2.PushHandler = &http2.DefaultPushHandler{}
 		rt.cachedTransports[addr] = &t2
+	case http3.NextProtoH3:
+		utlsConfig := &tls.Config{
+			ClientSessionCache: rt.clientSessionCache,
+			InsecureSkipVerify: rt.insecureSkipVerify,
+			OmitEmptyPsk:       true,
+		}
+		if rt.transportOptions != nil {
+			utlsConfig.RootCAs = rt.transportOptions.RootCAs
+		}
+
+		if rt.serverNameOverwrite != "" {
+			utlsConfig.ServerName = rt.serverNameOverwrite
+		}
+
+		if rt.transportOptions != nil {
+			utlsConfig.RootCAs = rt.transportOptions.RootCAs
+		}
+
+		if rt.serverNameOverwrite != "" {
+			utlsConfig.ServerName = rt.serverNameOverwrite
+		}
+
+		t3 := http3.Transport{
+			TLSClientConfig: utlsConfig,
+		}
+
+		if rt.settings == nil {
+			// when we not provide a map of custom http2 settings
+			t3.AdditionalSettings = map[uint64]uint64{
+				uint64(http2.SettingMaxConcurrentStreams): 1000,
+				uint64(http2.SettingMaxFrameSize):         16384,
+				uint64(http2.SettingInitialWindowSize):    6291456,
+				uint64(http2.SettingHeaderTableSize):      65536,
+			}
+		} else {
+			// convert settings map from uint32 to uint64
+			convertedSettings := map[uint64]uint64{}
+			for key, value := range rt.settings {
+				convertedSettings[uint64(key)] = uint64(value)
+			}
+
+			// use custom settings
+			t3.AdditionalSettings = convertedSettings
+		}
+
+		if rt.transportOptions != nil {
+			t3.DisableCompression = rt.transportOptions.DisableCompression
+			t3.MaxResponseHeaderBytes = rt.transportOptions.MaxResponseHeaderBytes
+		}
+
+		rt.cachedTransports[addr] = &t3
 	default:
 		rt.cachedTransports[addr] = rt.buildHttp1Transport()
 	}
@@ -361,7 +413,6 @@ func newRoundTripper(clientProfile profiles.ClientProfile, transportOptions *Tra
 
 func supportsSessionResumption(id tls.ClientHelloID) bool {
 	spec, err := tls.UTLSIdToSpec(id)
-
 	if err != nil {
 		spec, err = id.ToSpec()
 
